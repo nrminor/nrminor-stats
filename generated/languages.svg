@@ -132,7 +132,7 @@ div.ellipsis {
 
 <div>
 <span class="progress">
-<span style="background-color: #3572A5;width: 52.711%;" class="progress-item"></span><span style="background-color: #198CE7;width: 18.173%;" class="progress-item"></span><span style="background-color: #3ac486;width: 17.734%;" class="progress-item"></span><span style="background-color: #dea584;width: 4.652%;" class="progress-item"></span><span style="background-color: #384d54;width: 2.084%;" class="progress-item"></span><span style="background-color: #89e051;width: 1.925%;" class="progress-item"></span><span style="background-color: #00ADD8;width: 1.838%;" class="progress-item"></span><span style="background-color: #384d54;width: 0.752%;" class="progress-item"></span><span style="background-color: #4E9906;width: 0.130%;" class="progress-item"></span>
+<span style="background-color: #3572A5;width: 52.589%;" class="progress-item"></span><span style="background-color: #198CE7;width: 18.042%;" class="progress-item"></span><span style="background-color: #3ac486;width: 17.691%;" class="progress-item"></span><span style="background-color: #dea584;width: 4.641%;" class="progress-item"></span><span style="background-color: #384d54;width: 2.080%;" class="progress-item"></span><span style="background-color: #89e051;width: 1.921%;" class="progress-item"></span><span style="background-color: #00ADD8;width: 1.834%;" class="progress-item"></span><span style="background-color: #384d54;width: 0.750%;" class="progress-item"></span><span style="background-color: #a270ba;width: 0.323%;" class="progress-item"></span><span style="background-color: #4E9906;width: 0.129%;" class="progress-item"></span>
 </span>
 </div>
 
@@ -144,7 +144,7 @@ div.ellipsis {
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">Python</span>
-<span class="percent">52.71%</span>
+<span class="percent">52.59%</span>
 </li>
 
 
@@ -153,7 +153,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">R</span>
-<span class="percent">18.17%</span>
+<span class="percent">18.04%</span>
 </li>
 
 
@@ -162,7 +162,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">Nextflow</span>
-<span class="percent">17.73%</span>
+<span class="percent">17.69%</span>
 </li>
 
 
@@ -171,7 +171,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">Rust</span>
-<span class="percent">4.65%</span>
+<span class="percent">4.64%</span>
 </li>
 
 
@@ -189,7 +189,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">Shell</span>
-<span class="percent">1.93%</span>
+<span class="percent">1.92%</span>
 </li>
 
 
@@ -198,7 +198,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">Go</span>
-<span class="percent">1.84%</span>
+<span class="percent">1.83%</span>
 </li>
 
 
@@ -212,6 +212,15 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 
 
 <li style="animation-delay: 1200ms;">
+<svg xmlns="http://www.w3.org/2000/svg" class="octicon" style="fill:#a270ba;"
+viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
+fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
+<span class="lang">Julia</span>
+<span class="percent">0.32%</span>
+</li>
+
+
+<li style="animation-delay: 1350ms;">
 <svg xmlns="http://www.w3.org/2000/svg" class="octicon" style="fill:#4E9906;"
 viewBox="0 0 16 16" version="1.1" width="16" height="16"><path
 fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
