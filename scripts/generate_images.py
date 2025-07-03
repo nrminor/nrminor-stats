@@ -1,4 +1,11 @@
 #!/usr/bin/python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "aiohttp",
+#     "requests",
+# ]
+# ///
 
 import asyncio
 import os
@@ -62,6 +69,11 @@ async def generate_languages(s: Stats) -> None:
     sorted_languages = sorted(
         (await s.languages).items(), reverse=True, key=lambda t: t[1].get("size")
     )
+    # Limit to 10 languages to prevent overflow in the SVG container
+    # This ensures proper display across different browsers and font rendering systems
+    max_languages = 10
+    sorted_languages = sorted_languages[:max_languages]
+    
     delay_between = 150
     for i, (lang, data) in enumerate(sorted_languages):
         color = data.get("color")

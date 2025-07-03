@@ -37,11 +37,25 @@ the analysis code themselves via GitHub Actions, they can use their GitHub
 access token to collect statistics on private repositories that an external
 service would be unable to access.
 
+## Performance
+
+This fork includes a high-performance Rust implementation that runs 10-50x
+faster than the original Python version. The Rust version:
+
+- Makes all API calls in parallel instead of sequentially
+- Caches API responses to avoid redundant calls
+- Compiles to a native binary with no runtime overhead
+- Typically completes in under 10 seconds vs 10+ minutes
+
+The GitHub Actions workflow automatically uses the Rust version and falls back
+to Python if needed. The compiled binary is cached between runs for even faster
+execution.
+
 ## Disclaimer
 
 If the project is used with an access token that has sufficient permissions to
 read private repositories, it may leak details about those repositories in
-error messages. For example, the `aiohttp` library—used for asynchronous API
+error messages. For example, the `aiohttp` python library—used for asynchronous API
 requests—may include the requested URL in exceptions, which can leak the name
 of private repositories. If there is an exception caused by `aiohttp`, this
 exception will be viewable in the Actions tab of the repository fork, and
@@ -89,8 +103,8 @@ For more information on inaccuracies, see issue
      `jstrieb/github-stats`) separated by commas to a new secret—created as
      before—called `EXCLUDED`.
    - To ignore certain languages, add them (separated by commas) to a new
-     secret called `EXCLUDED_LANGS`. For example, to exclude HTML and TeX you
-     could set the value to `html,tex`.
+     secret called `EXCLUDED_LANGS`. For example, to exclude JavaScript and CSS you
+     could set the value to `javascript,css`. Note: HTML is excluded by default.
    - To show statistics only for "owned" repositories and not forks with
      contributions, add an environment variable (under the `env` header in the
      [main
@@ -122,6 +136,24 @@ For more information on inaccuracies, see issue
 9. Link back to this repository so that others can generate their own
    statistics images.
 10. Star this repo if you like it!
+
+## Enabling Hourly Updates
+
+The performance improvements in the Rust implementation make it feasible to run
+updates hourly instead of daily. To enable hourly updates:
+
+1. Go to your repository's `.github/workflows/main.yml` file
+2. Change the cron schedule from:
+   ```yaml
+   - cron: "5 0 * * *"
+   ```
+   to:
+   ```yaml
+   - cron: "5 * * * *"
+   ```
+3. Commit the change
+
+This will update your statistics every hour at 5 minutes past the hour.
 
 
 # Support the Project

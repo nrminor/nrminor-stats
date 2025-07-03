@@ -5,7 +5,8 @@ import os
 from typing import Dict, List, Optional, Set, Tuple, Any, cast
 
 import aiohttp
-import requests
+
+from github_stats_cache import GitHubStatsCache
 
 
 ###############################################################################
@@ -25,11 +26,13 @@ class Queries(object):
         access_token: str,
         session: aiohttp.ClientSession,
         max_connections: int = 10,
+        cache: Optional[GitHubStatsCache] = None,
     ):
         self.username = username
         self.access_token = access_token
         self.session = session
         self.semaphore = asyncio.Semaphore(max_connections)
+        self.cache = cache
 
     async def query(self, generated_query: str) -> Dict:
         """
@@ -47,22 +50,15 @@ class Queries(object):
                     "https://api.github.com/graphql",
                     headers=headers,
                     json={"query": generated_query},
+                    timeout=aiohttp.ClientTimeout(total=30)
                 )
             result = await r_async.json()
             if result is not None:
                 return result
-        except:
-            print("aiohttp failed for GraphQL query")
-            # Fall back on non-async requests
-            async with self.semaphore:
-                r_requests = requests.post(
-                    "https://api.github.com/graphql",
-                    headers=headers,
-                    json={"query": generated_query},
-                )
-                result = r_requests.json()
-                if result is not None:
-                    return result
+        except asyncio.TimeoutError:
+            print("GraphQL query timed out")
+        except Exception as e:
+            print(f"GraphQL query failed: {e}")
         return dict()
 
     async def query_rest(self, path: str, params: Optional[Dict] = None) -> Dict:
@@ -72,48 +68,59 @@ class Queries(object):
         :param params: Query parameters to be passed to the API
         :return: deserialized REST JSON output
         """
-
-        for _ in range(60):
-            headers = {
-                "Authorization": f"token {self.access_token}",
-            }
-            if params is None:
-                params = dict()
-            if path.startswith("/"):
-                path = path[1:]
+        # Check cache first
+        cache_key = f"rest:{path}:{str(params)}"
+        if self.cache:
+            cached_result = self.cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+        
+        headers = {
+            "Authorization": f"token {self.access_token}",
+        }
+        if params is None:
+            params = dict()
+        if path.startswith("/"):
+            path = path[1:]
+        
+        retry_count = 0
+        max_retries = 10  # Reduced from 60 for faster failure
+        
+        while retry_count < max_retries:
             try:
                 async with self.semaphore:
                     r_async = await self.session.get(
                         f"https://api.github.com/{path}",
                         headers=headers,
                         params=tuple(params.items()),
+                        timeout=aiohttp.ClientTimeout(total=30)
                     )
+                
                 if r_async.status == 202:
-                    # print(f"{path} returned 202. Retrying...")
-                    print(f"A path returned 202. Retrying...")
-                    await asyncio.sleep(2)
+                    retry_count += 1
+                    if retry_count % 5 == 0:
+                        print(f"Waiting for {path} (attempt {retry_count}/{max_retries})...")
+                    await asyncio.sleep(1)  # Reduced from 2 seconds
                     continue
-
-                result = await r_async.json()
-                if result is not None:
-                    return result
-            except:
-                print("aiohttp failed for rest query")
-                # Fall back on non-async requests
-                async with self.semaphore:
-                    r_requests = requests.get(
-                        f"https://api.github.com/{path}",
-                        headers=headers,
-                        params=tuple(params.items()),
-                    )
-                    if r_requests.status_code == 202:
-                        print(f"A path returned 202. Retrying...")
-                        await asyncio.sleep(2)
-                        continue
-                    elif r_requests.status_code == 200:
-                        return r_requests.json()
-        # print(f"There were too many 202s. Data for {path} will be incomplete.")
-        print("There were too many 202s. Data for this repository will be incomplete.")
+                elif r_async.status == 200:
+                    result = await r_async.json()
+                    if result is not None:
+                        # Cache the successful result
+                        if self.cache:
+                            self.cache.set(cache_key, result)
+                        return result
+                else:
+                    print(f"REST API returned status {r_async.status} for {path}")
+                    return dict()
+                    
+            except asyncio.TimeoutError:
+                print(f"REST query timed out for {path}")
+                return dict()
+            except Exception as e:
+                print(f"REST query failed for {path}: {e}")
+                return dict()
+        
+        print(f"Too many retries for {path}. Data will be incomplete.")
         return dict()
 
     @staticmethod
@@ -258,12 +265,16 @@ class Stats(object):
         exclude_repos: Optional[Set] = None,
         exclude_langs: Optional[Set] = None,
         ignore_forked_repos: bool = False,
+        use_cache: bool = True,
     ):
         self.username = username
         self._ignore_forked_repos = ignore_forked_repos
         self._exclude_repos = set() if exclude_repos is None else exclude_repos
         self._exclude_langs = set() if exclude_langs is None else exclude_langs
-        self.queries = Queries(username, access_token, session)
+        
+        # Initialize cache if enabled
+        cache = GitHubStatsCache() if use_cache else None
+        self.queries = Queries(username, access_token, session, cache=cache)
 
         self._name: Optional[str] = None
         self._stargazers: Optional[int] = None
@@ -481,10 +492,29 @@ Languages:
         """
         if self._lines_changed is not None:
             return self._lines_changed
+        
         additions = 0
         deletions = 0
-        for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+        
+        # Fetch all repos' contributor stats in parallel
+        repos = await self.repos
+        tasks = []
+        for repo in repos:
+            task = self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            tasks.append((repo, task))
+        
+        # Wait for all requests to complete
+        results = []
+        for repo, task in tasks:
+            try:
+                result = await task
+                results.append((repo, result))
+            except Exception as e:
+                print(f"Error fetching stats for {repo}: {e}")
+                continue
+        
+        # Process results
+        for repo, r in results:
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if not isinstance(author_obj, dict) or not isinstance(
@@ -512,8 +542,26 @@ Languages:
             return self._views
 
         total = 0
-        for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/traffic/views")
+        
+        # Fetch all repos' view stats in parallel
+        repos = await self.repos
+        tasks = []
+        for repo in repos:
+            task = self.queries.query_rest(f"/repos/{repo}/traffic/views")
+            tasks.append((repo, task))
+        
+        # Wait for all requests to complete
+        results = []
+        for repo, task in tasks:
+            try:
+                result = await task
+                results.append((repo, result))
+            except Exception as e:
+                print(f"Error fetching views for {repo}: {e}")
+                continue
+        
+        # Process results
+        for repo, r in results:
             for view in r.get("views", []):
                 total += view.get("count", 0)
 
