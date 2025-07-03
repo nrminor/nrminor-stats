@@ -7,6 +7,8 @@ use tokio::time::{sleep, Duration};
 
 use crate::cache::Cache;
 
+const MAX_RETRIES: u32 = 10;
+
 pub struct GitHubClient {
     client: Client,
     access_token: String,
@@ -43,7 +45,10 @@ impl GitHubClient {
 
         let status = response.status();
         if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_else(|_| "No error body".to_string());
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "No error body".to_string());
             return Err(anyhow!(
                 "GraphQL query failed with status: {}. Body: {}",
                 status,
@@ -56,25 +61,24 @@ impl GitHubClient {
     }
 
     pub async fn rest_get(&self, path: &str) -> Result<Value> {
-        let cache_key = format!("rest:{}", path);
-        
+        let cache_key = format!("rest:{path}");
+
         // Check cache first
         if let Some(cached) = self.cache.get(&cache_key) {
             return Ok(cached);
         }
 
         let url = if path.starts_with('/') {
-            format!("https://api.github.com{}", path)
+            format!("https://api.github.com{path}")
         } else {
-            format!("https://api.github.com/{}", path)
+            format!("https://api.github.com/{path}")
         };
 
         let mut retries = 0;
-        const MAX_RETRIES: u32 = 10;
 
         loop {
-            let _permit = self.semaphore.acquire().await?;
-            
+            let permit = self.semaphore.acquire().await?;
+
             let response = self
                 .client
                 .get(&url)
@@ -96,13 +100,14 @@ impl GitHubClient {
                         return Err(anyhow!("Too many retries for {}", path));
                     }
                     if retries == 5 || retries == MAX_RETRIES {
-                        println!("Still waiting for {} statistics (attempt {}/{})", 
-                            path.split('/').nth(2).unwrap_or("repo"), 
-                            retries, 
+                        println!(
+                            "Still waiting for {} statistics (attempt {}/{})",
+                            path.split('/').nth(2).unwrap_or("repo"),
+                            retries,
                             MAX_RETRIES
                         );
                     }
-                    drop(_permit); // Release semaphore before sleeping
+                    drop(permit); // Release semaphore before sleeping
                     sleep(Duration::from_secs(1)).await;
                 }
                 _ => {

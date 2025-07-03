@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use crate::github_client::GitHubClient;
 
@@ -37,14 +38,14 @@ pub struct StatsCollector {
 
 impl StatsCollector {
     pub fn new(
-        username: String,
+        username: &str,
         access_token: String,
         excluded_repos: Vec<String>,
-        excluded_langs: Vec<String>,
+        excluded_langs: &[String],
         exclude_forked: bool,
     ) -> Self {
         Self {
-            username: username.clone(),
+            username: username.to_string(),
             client: GitHubClient::new(access_token, 10),
             excluded_repos,
             excluded_langs: excluded_langs.iter().map(|s| s.to_lowercase()).collect(),
@@ -107,11 +108,11 @@ impl StatsCollector {
         let mut contrib_cursor: Option<String> = None;
 
         loop {
-            let query = self.build_repos_query(owned_cursor.as_deref(), contrib_cursor.as_deref());
+            let query = Self::build_repos_query(owned_cursor.as_deref(), contrib_cursor.as_deref());
             let response = self.client.graphql_query(&query).await?;
 
             let data = &response["data"]["viewer"];
-            
+
             // Get name
             if stats.name.is_empty() {
                 stats.name = data["name"]
@@ -171,9 +172,8 @@ impl StatsCollector {
             return;
         }
 
-        let name = match repo["nameWithOwner"].as_str() {
-            Some(n) => n,
-            None => return,
+        let Some(name) = repo["nameWithOwner"].as_str() else {
+            return;
         };
 
         // Skip if excluded
@@ -205,12 +205,15 @@ impl StatsCollector {
                 let size = edge["size"].as_u64().unwrap_or(0);
                 let color = edge["node"]["color"].as_str().map(String::from);
 
-                let entry = stats.languages.entry(lang_name.to_string()).or_insert(LanguageInfo {
-                    size: 0,
-                    occurrences: 0,
-                    color,
-                    percentage: 0.0,
-                });
+                let entry = stats
+                    .languages
+                    .entry(lang_name.to_string())
+                    .or_insert(LanguageInfo {
+                        size: 0,
+                        occurrences: 0,
+                        color,
+                        percentage: 0.0,
+                    });
 
                 entry.size += size;
                 entry.occurrences += 1;
@@ -220,14 +223,14 @@ impl StatsCollector {
 
     async fn collect_contributions(&self) -> Result<u64> {
         // Get contribution years
-        let years_query = r#"
+        let years_query = r"
         query {
             viewer {
                 contributionsCollection {
                     contributionYears
                 }
             }
-        }"#;
+        }";
 
         let response = self.client.graphql_query(years_query).await?;
         let years = response["data"]["viewer"]["contributionsCollection"]["contributionYears"]
@@ -242,7 +245,8 @@ impl StatsCollector {
         let mut year_queries = String::new();
         for year in years {
             if let Some(year_val) = year.as_i64() {
-                year_queries.push_str(&format!(
+                write!(
+                    year_queries,
                     r#"
                     year{}: contributionsCollection(
                         from: "{}-01-01T00:00:00Z",
@@ -252,19 +256,20 @@ impl StatsCollector {
                             totalContributions
                         }}
                     }}"#,
-                    year_val, year_val, year_val + 1
-                ));
+                    year_val,
+                    year_val,
+                    year_val + 1
+                )?;
             }
         }
 
         let query = format!(
-            r#"
+            r"
             query {{
                 viewer {{
-                    {}
+                    {year_queries}
                 }}
-            }}"#,
-            year_queries
+            }}"
         );
 
         let response = self.client.graphql_query(&query).await?;
@@ -273,7 +278,8 @@ impl StatsCollector {
         let mut total = 0u64;
         if let Some(obj) = viewer.as_object() {
             for (_key, value) in obj {
-                if let Some(contribs) = value["contributionCalendar"]["totalContributions"].as_u64() {
+                if let Some(contribs) = value["contributionCalendar"]["totalContributions"].as_u64()
+                {
                     total += contribs;
                 }
             }
@@ -285,7 +291,7 @@ impl StatsCollector {
     async fn collect_lines_changed(&self, repos: &[String]) -> Result<(u64, u64)> {
         let paths: Vec<String> = repos
             .iter()
-            .map(|repo| format!("/repos/{}/stats/contributors", repo))
+            .map(|repo| format!("/repos/{repo}/stats/contributors"))
             .collect();
 
         let results = self.client.rest_get_batch(paths).await;
@@ -318,7 +324,7 @@ impl StatsCollector {
     async fn collect_views(&self, repos: &[String]) -> Result<u64> {
         let paths: Vec<String> = repos
             .iter()
-            .map(|repo| format!("/repos/{}/traffic/views", repo))
+            .map(|repo| format!("/repos/{repo}/traffic/views"))
             .collect();
 
         let results = self.client.rest_get_batch(paths).await;
@@ -337,9 +343,9 @@ impl StatsCollector {
         Ok(total_views)
     }
 
-    fn build_repos_query(&self, owned_cursor: Option<&str>, contrib_cursor: Option<&str>) -> String {
+    fn build_repos_query(owned_cursor: Option<&str>, contrib_cursor: Option<&str>) -> String {
         format!(
-            r#"{{
+            r"{{
                 viewer {{
                     login,
                     name,
@@ -399,9 +405,9 @@ impl StatsCollector {
                         }}
                     }}
                 }}
-            }}"#,
-            owned_cursor.map(|c| format!(r#""{}""#, c)).unwrap_or_else(|| "null".to_string()),
-            contrib_cursor.map(|c| format!(r#""{}""#, c)).unwrap_or_else(|| "null".to_string())
+            }}",
+            owned_cursor.map_or_else(|| "null".to_string(), |c| format!(r#""{c}""#)),
+            contrib_cursor.map_or_else(|| "null".to_string(), |c| format!(r#""{c}""#))
         )
     }
 }

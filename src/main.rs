@@ -48,10 +48,10 @@ async fn main() -> Result<()> {
     // Collect statistics
     println!("Collecting GitHub statistics for {username}...");
     let stats_collector = StatsCollector::new(
-        username,
+        &username,
         access_token,
         excluded_repos,
-        excluded_langs,
+        &excluded_langs,
         exclude_forked,
     );
 
@@ -59,10 +59,9 @@ async fn main() -> Result<()> {
 
     // Generate SVGs
     println!("Generating SVG files...");
-    let generator = SvgGenerator::new();
 
-    generator.generate_overview(&stats).await?;
-    generator.generate_languages(&stats).await?;
+    SvgGenerator::generate_overview(&stats)?;
+    SvgGenerator::generate_languages(&stats)?;
 
     println!("Successfully generated statistics!");
     Ok(())

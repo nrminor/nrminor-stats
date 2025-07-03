@@ -1,17 +1,14 @@
 use anyhow::Result;
-use std::fs;
-use std::path::Path;
+use std::{fmt::Write, fs, path::Path};
 
-use crate::stats::{Stats, LanguageInfo};
+use crate::stats::{LanguageInfo, Stats};
+
+const MAX_LANGUAGES: usize = 10;
 
 pub struct SvgGenerator;
 
 impl SvgGenerator {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub async fn generate_overview(&self, stats: &Stats) -> Result<()> {
+    pub fn generate_overview(stats: &Stats) -> Result<()> {
         // Read template
         let template = fs::read_to_string("templates/overview.svg")?;
 
@@ -20,8 +17,14 @@ impl SvgGenerator {
             .replace("{{ name }}", &stats.name)
             .replace("{{ stars }}", &format_number(stats.total_stars))
             .replace("{{ forks }}", &format_number(stats.total_forks))
-            .replace("{{ contributions }}", &format_number(stats.total_contributions))
-            .replace("{{ lines_changed }}", &format_number(stats.lines_added + stats.lines_deleted))
+            .replace(
+                "{{ contributions }}",
+                &format_number(stats.total_contributions),
+            )
+            .replace(
+                "{{ lines_changed }}",
+                &format_number(stats.lines_added + stats.lines_deleted),
+            )
             .replace("{{ views }}", &format_number(stats.total_views))
             .replace("{{ repos }}", &format_number(stats.total_repos as u64));
 
@@ -35,7 +38,7 @@ impl SvgGenerator {
         Ok(())
     }
 
-    pub async fn generate_languages(&self, stats: &Stats) -> Result<()> {
+    pub fn generate_languages(stats: &Stats) -> Result<()> {
         // Read template
         let template = fs::read_to_string("templates/languages.svg")?;
 
@@ -47,7 +50,7 @@ impl SvgGenerator {
         let mut progress = String::new();
         let mut lang_list = String::new();
         let delay_between = 150;
-        
+
         // Calculate how many languages fit
         // foreignObject height: 176px
         // Header (h2): ~36px (16px font + 24px line-height + margin)
@@ -56,17 +59,18 @@ impl SvgGenerator {
         // Each row: 21px (line-height)
         // Maximum rows: 5 (118px / 21px = 5.6)
         // With wrapping, we need to limit total to avoid overflow
-        const MAX_LANGUAGES: usize = 10;
 
         for (i, (name, info)) in languages.iter().take(MAX_LANGUAGES).enumerate() {
             let color = info.color.as_deref().unwrap_or("#000000");
-            
-            progress.push_str(&format!(
+
+            write!(
+                progress,
                 r#"<span style="background-color: {};width: {:.3}%;" class="progress-item"></span>"#,
                 color, info.percentage
-            ));
+            )?;
 
-            lang_list.push_str(&format!(
+            write!(
+                lang_list,
                 r#"
 <li style="animation-delay: {}ms;">
 <svg xmlns="http://www.w3.org/2000/svg" class="octicon" style="fill:{};"
@@ -80,7 +84,7 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
                 color,
                 name,
                 info.percentage
-            ));
+            )?;
         }
 
         // Replace placeholders
@@ -97,14 +101,12 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 fn format_number(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
-    let mut count = 0;
 
-    for ch in s.chars().rev() {
+    for (count, ch) in s.chars().rev().enumerate() {
         if count > 0 && count % 3 == 0 {
             result.push(',');
         }
         result.push(ch);
-        count += 1;
     }
 
     result.chars().rev().collect()
