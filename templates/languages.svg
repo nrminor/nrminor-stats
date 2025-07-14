@@ -16,39 +16,6 @@ svg {
   ry: 6px;
 }
 
-@media (prefers-color-scheme: dark) {
-  #background {
-    fill: #0d1117;
-    stroke-width: 0.5px;
-  }
- 
-  h2 {
-    color: #58a6ff;
-    fill: #58a6ff;
-  } 
-
-  .octicon {
-    color: #8b949e;
-    fill: #8b949e;
-  }
-
-  .progress {
-    background-color: rgba(110, 118, 129, 0.4);
-  }
-
-  .progress-item {
-    outline: 2px solid #393f47;
-  }
-
-  .lang {
-    color: #c9d1d9;
-  }
-
-  .percent {
-    color: #8b949e;
-  }
-}
-
 foreignObject {
   width: calc(100% - 10px - 32px);
   height: calc(100% - 10px - 24px);
@@ -122,6 +89,39 @@ div.ellipsis {
 
 .percent {
   color: rgb(88, 96, 105)
+}
+
+@media (prefers-color-scheme: dark) {
+  #background {
+    fill: #0d1117;
+    stroke-width: 0.5px;
+  }
+ 
+  h2 {
+    color: #58a6ff;
+    fill: #58a6ff;
+  } 
+
+  .octicon {
+    color: #8b949e;
+    fill: #8b949e;
+  }
+
+  .progress {
+    background-color: rgba(110, 118, 129, 0.4);
+  }
+
+  .progress-item {
+    outline: 2px solid #393f47;
+  }
+
+  .lang {
+    color: #c9d1d9;
+  }
+
+  .percent {
+    color: #8b949e;
+  }
 }
 </style>
 <g>
