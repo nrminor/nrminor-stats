@@ -3,7 +3,7 @@ use std::{fmt::Write, fs, path::Path};
 
 use crate::stats::{LanguageInfo, Stats};
 
-const MAX_LANGUAGES: usize = 10;
+const MAX_LANGUAGES: usize = 12;
 
 pub struct SvgGenerator;
 

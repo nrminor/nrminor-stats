@@ -39,12 +39,12 @@ service would be unable to access.
 
 ## Performance
 
-This fork includes a high-performance Rust implementation that runs 10-50x
-faster than the original Python version. The Rust version:
+This fork includes a Rust implementation that runs 10-50x faster than the original
+Python version. The Rust version:
 
 - Makes all API calls in parallel instead of sequentially
 - Caches API responses to avoid redundant calls
-- Compiles to a native binary with no runtime overhead
+- Compiles to a native binary with almost no overhead compared to the Python runtime
 - Typically completes in under 10 seconds vs 10+ minutes
 
 The GitHub Actions workflow automatically uses the Rust version and falls back
