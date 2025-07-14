@@ -25,10 +25,9 @@ h2 {
   margin-top: 0;
   margin-bottom: 0.75em;
   line-height: 24px;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: rgb(3, 102, 214);
-  fill: rgb(3, 102, 214);
 }
 
 ul {
@@ -99,7 +98,6 @@ div.ellipsis {
  
   h2 {
     color: #58a6ff;
-    fill: #58a6ff;
   } 
 
   .octicon {
