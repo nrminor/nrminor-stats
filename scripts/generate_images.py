@@ -12,9 +12,7 @@ import os
 import re
 
 import aiohttp
-
 from github_stats import Stats
-
 
 ################################################################################
 # Helper Functions
@@ -39,7 +37,7 @@ async def generate_overview(s: Stats) -> None:
     Generate an SVG badge with summary statistics
     :param s: Represents user's GitHub statistics
     """
-    with open("templates/overview.svg", "r") as f:
+    with open("templates/overview.svg") as f:
         output = f.read()
 
     output = re.sub("{{ name }}", await s.name, output)
@@ -61,19 +59,21 @@ async def generate_languages(s: Stats) -> None:
     Generate an SVG badge with summary languages used
     :param s: Represents user's GitHub statistics
     """
-    with open("templates/languages.svg", "r") as f:
+    with open("templates/languages.svg") as f:
         output = f.read()
 
     progress = ""
     lang_list = ""
     sorted_languages = sorted(
-        (await s.languages).items(), reverse=True, key=lambda t: t[1].get("size")
+        (await s.languages).items(),
+        reverse=True,
+        key=lambda t: t[1].get("size"),
     )
     # Limit to 10 languages to prevent overflow in the SVG container
     # This ensures proper display across different browsers and font rendering systems
-    max_languages = 10
+    max_languages = 12
     sorted_languages = sorted_languages[:max_languages]
-    
+
     delay_between = 150
     for i, (lang, data) in enumerate(sorted_languages):
         color = data.get("color")
@@ -119,18 +119,13 @@ async def main() -> None:
     if user is None:
         raise RuntimeError("Environment variable GITHUB_ACTOR must be set.")
     exclude_repos = os.getenv("EXCLUDED")
-    excluded_repos = (
-        {x.strip() for x in exclude_repos.split(",")} if exclude_repos else None
-    )
+    excluded_repos = {x.strip() for x in exclude_repos.split(",")} if exclude_repos else None
     exclude_langs = os.getenv("EXCLUDED_LANGS")
-    excluded_langs = (
-        {x.strip() for x in exclude_langs.split(",")} if exclude_langs else None
-    )
+    excluded_langs = {x.strip() for x in exclude_langs.split(",")} if exclude_langs else None
     # Convert a truthy value to a Boolean
     raw_ignore_forked_repos = os.getenv("EXCLUDE_FORKED_REPOS")
     ignore_forked_repos = (
-        not not raw_ignore_forked_repos
-        and raw_ignore_forked_repos.strip().lower() != "false"
+        bool(raw_ignore_forked_repos) and raw_ignore_forked_repos.strip().lower() != "false"
     )
     async with aiohttp.ClientSession() as session:
         s = Stats(

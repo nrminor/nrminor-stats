@@ -23,8 +23,8 @@ svg {
   }
  
   h2 {
-    color: #c9d1d9;
-    fill: #c9d1d9;
+    color: #58a6ff;
+    fill: #58a6ff;
   } 
 
   .octicon {
