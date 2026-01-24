@@ -28,6 +28,27 @@ pub struct LanguageInfo {
     pub percentage: f64,
 }
 
+#[derive(Debug, Clone)]
+struct RepoLanguageEntry {
+    name: String,
+    size: u64,
+    color: Option<String>,
+}
+
+#[derive(Debug)]
+struct RepoData {
+    languages: Vec<RepoLanguageEntry>,
+}
+
+#[derive(Debug)]
+enum RatioResult {
+    Calculated(f64),
+    FallbackNoStats,
+    FallbackEmptyStats,
+    FallbackNoLines,
+    FallbackUserNotFound,
+}
+
 pub struct StatsCollector {
     username: String,
     client: GitHubClient,
@@ -67,23 +88,30 @@ impl StatsCollector {
             languages: HashMap::new(),
         };
 
-        // Collect repository information
-        let repos = self.collect_repos(&mut stats).await?;
+        // Phase 1: Collect repository information and raw language data
+        let (repos, repo_languages) = self.collect_repos(&mut stats).await?;
         stats.total_repos = repos.len();
 
-        // Collect contributions
-        stats.total_contributions = self.collect_contributions().await?;
+        // Phase 2: Fetch contributor stats for all repos (used for both
+        // contribution ratios and lines changed)
+        let contributor_stats = self.fetch_contributor_stats(&repos).await;
 
-        // Collect lines changed and views in parallel
-        let (lines_changed, views) = tokio::join!(
-            self.collect_lines_changed(&repos),
+        // Phase 3: Calculate contribution ratios and apply weighted language stats
+        let ratios = self.calculate_contribution_ratios(&contributor_stats, &repos);
+        Self::apply_weighted_languages(&repo_languages, &ratios, &mut stats);
+
+        // Extract lines added/deleted from contributor stats
+        let (added, deleted) = self.extract_lines_changed(&contributor_stats);
+        stats.lines_added = added;
+        stats.lines_deleted = deleted;
+
+        // Collect contributions and views in parallel
+        let (contributions, views) = tokio::join!(
+            self.collect_contributions(),
             self.collect_views(&repos)
         );
 
-        if let Ok((added, deleted)) = lines_changed {
-            stats.lines_added = added;
-            stats.lines_deleted = deleted;
-        }
+        stats.total_contributions = contributions?;
 
         if let Ok(total_views) = views {
             stats.total_views = total_views;
@@ -92,18 +120,24 @@ impl StatsCollector {
         // Calculate language percentages
         let total_size: u64 = stats.languages.values().map(|l| l.size).sum();
         for lang in stats.languages.values_mut() {
-            lang.percentage = if total_size > 0 {
+            #[allow(clippy::cast_precision_loss)]
+            let percentage = if total_size > 0 {
                 (lang.size as f64 / total_size as f64) * 100.0
             } else {
                 0.0
             };
+            lang.percentage = percentage;
         }
 
         Ok(stats)
     }
 
-    async fn collect_repos(&self, stats: &mut Stats) -> Result<Vec<String>> {
+    async fn collect_repos(
+        &self,
+        stats: &mut Stats,
+    ) -> Result<(Vec<String>, HashMap<String, RepoData>)> {
         let mut repos = Vec::new();
+        let mut repo_languages: HashMap<String, RepoData> = HashMap::new();
         let mut owned_cursor: Option<String> = None;
         let mut contrib_cursor: Option<String> = None;
 
@@ -126,7 +160,7 @@ impl StatsCollector {
             if let Some(owned) = data["repositories"].as_object() {
                 if let Some(nodes) = owned["nodes"].as_array() {
                     for repo in nodes {
-                        self.process_repo(repo, &mut repos, stats);
+                        self.process_repo(repo, &mut repos, &mut repo_languages, stats);
                     }
                 }
 
@@ -144,7 +178,7 @@ impl StatsCollector {
                 if let Some(contrib) = data["repositoriesContributedTo"].as_object() {
                     if let Some(nodes) = contrib["nodes"].as_array() {
                         for repo in nodes {
-                            self.process_repo(repo, &mut repos, stats);
+                            self.process_repo(repo, &mut repos, &mut repo_languages, stats);
                         }
                     }
 
@@ -164,10 +198,16 @@ impl StatsCollector {
             }
         }
 
-        Ok(repos)
+        Ok((repos, repo_languages))
     }
 
-    fn process_repo(&self, repo: &Value, repos: &mut Vec<String>, stats: &mut Stats) {
+    fn process_repo(
+        &self,
+        repo: &Value,
+        repos: &mut Vec<String>,
+        repo_languages: &mut HashMap<String, RepoData>,
+        stats: &mut Stats,
+    ) {
         if repo.is_null() {
             return;
         }
@@ -191,7 +231,8 @@ impl StatsCollector {
             stats.total_forks += forks;
         }
 
-        // Process languages
+        // Collect raw language data (will be weighted later)
+        let mut languages = Vec::new();
         if let Some(edges) = repo["languages"]["edges"].as_array() {
             for edge in edges {
                 let lang_name = edge["node"]["name"].as_str().unwrap_or("Other");
@@ -205,20 +246,15 @@ impl StatsCollector {
                 let size = edge["size"].as_u64().unwrap_or(0);
                 let color = edge["node"]["color"].as_str().map(String::from);
 
-                let entry = stats
-                    .languages
-                    .entry(lang_name.to_string())
-                    .or_insert(LanguageInfo {
-                        size: 0,
-                        occurrences: 0,
-                        color,
-                        percentage: 0.0,
-                    });
-
-                entry.size += size;
-                entry.occurrences += 1;
+                languages.push(RepoLanguageEntry {
+                    name: lang_name.to_string(),
+                    size,
+                    color,
+                });
             }
         }
+
+        repo_languages.insert(name.to_string(), RepoData { languages });
     }
 
     async fn collect_contributions(&self) -> Result<u64> {
@@ -288,39 +324,6 @@ impl StatsCollector {
         Ok(total)
     }
 
-    async fn collect_lines_changed(&self, repos: &[String]) -> Result<(u64, u64)> {
-        let paths: Vec<String> = repos
-            .iter()
-            .map(|repo| format!("/repos/{repo}/stats/contributors"))
-            .collect();
-
-        let results = self.client.rest_get_batch(paths).await;
-
-        let mut total_added = 0u64;
-        let mut total_deleted = 0u64;
-
-        for (_path, result) in results {
-            if let Ok(contributors) = result {
-                if let Some(contrib_array) = contributors.as_array() {
-                    for contributor in contrib_array {
-                        if let Some(author) = contributor["author"]["login"].as_str() {
-                            if author == self.username {
-                                if let Some(weeks) = contributor["weeks"].as_array() {
-                                    for week in weeks {
-                                        total_added += week["a"].as_u64().unwrap_or(0);
-                                        total_deleted += week["d"].as_u64().unwrap_or(0);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok((total_added, total_deleted))
-    }
-
     async fn collect_views(&self, repos: &[String]) -> Result<u64> {
         let paths: Vec<String> = repos
             .iter()
@@ -341,6 +344,171 @@ impl StatsCollector {
         }
 
         Ok(total_views)
+    }
+
+    async fn fetch_contributor_stats(&self, repos: &[String]) -> HashMap<String, Value> {
+        let paths: Vec<String> = repos
+            .iter()
+            .map(|repo| format!("/repos/{repo}/stats/contributors"))
+            .collect();
+
+        let results = self.client.rest_get_batch(paths).await;
+
+        let mut stats_map = HashMap::new();
+        for (path, result) in results {
+            if let Ok(data) = result {
+                // Extract repo name from path: /repos/{owner}/{repo}/stats/contributors
+                let parts: Vec<&str> = path.split('/').collect();
+                if parts.len() >= 4 {
+                    let repo_name = format!("{}/{}", parts[2], parts[3]);
+                    stats_map.insert(repo_name, data);
+                }
+            }
+        }
+
+        stats_map
+    }
+
+    fn calculate_contribution_ratios(
+        &self,
+        contributor_stats: &HashMap<String, Value>,
+        all_repos: &[String],
+    ) -> HashMap<String, f64> {
+        let mut ratios = HashMap::new();
+        let mut weighted_count = 0u32;
+        let mut fallback_count = 0u32;
+
+        for repo_name in all_repos {
+            let result = if let Some(contributors) = contributor_stats.get(repo_name) {
+                self.calculate_single_ratio(repo_name, contributors)
+            } else {
+                println!("  [fallback] {repo_name}: no contributor stats available");
+                RatioResult::FallbackNoStats
+            };
+
+            let ratio = if let RatioResult::Calculated(r) = &result {
+                weighted_count += 1;
+                *r
+            } else {
+                fallback_count += 1;
+                1.0
+            };
+
+            ratios.insert(repo_name.clone(), ratio);
+        }
+
+        let total = weighted_count + fallback_count;
+        println!(
+            "Weighted {weighted_count}/{total} repos by contribution ratio ({fallback_count} fell back to 100%)"
+        );
+
+        ratios
+    }
+
+    fn calculate_single_ratio(&self, repo_name: &str, contributors: &Value) -> RatioResult {
+        let Some(contrib_array) = contributors.as_array() else {
+            println!("  [fallback] {repo_name}: contributor stats not an array");
+            return RatioResult::FallbackNoStats;
+        };
+
+        if contrib_array.is_empty() {
+            println!("  [fallback] {repo_name}: empty contributor stats");
+            return RatioResult::FallbackEmptyStats;
+        }
+
+        let mut my_added: u64 = 0;
+        let mut total_added: u64 = 0;
+        let mut found_user = false;
+
+        for contributor in contrib_array {
+            let added: u64 = contributor["weeks"]
+                .as_array()
+                .map_or(0, |weeks| weeks.iter().map(|w| w["a"].as_u64().unwrap_or(0)).sum());
+
+            total_added += added;
+
+            if let Some(author) = contributor["author"]["login"].as_str() {
+                if author.eq_ignore_ascii_case(&self.username) {
+                    my_added = added;
+                    found_user = true;
+                }
+            }
+        }
+
+        if total_added == 0 {
+            println!("  [fallback] {repo_name}: no lines added by any contributor");
+            return RatioResult::FallbackNoLines;
+        }
+
+        if !found_user {
+            println!(
+                "  [fallback] {}: user '{}' not found in contributors",
+                repo_name, self.username
+            );
+            return RatioResult::FallbackUserNotFound;
+        }
+
+        #[allow(clippy::cast_precision_loss)]
+        let ratio = (my_added as f64 / total_added as f64).min(1.0);
+        RatioResult::Calculated(ratio)
+    }
+
+    fn apply_weighted_languages(
+        repo_languages: &HashMap<String, RepoData>,
+        ratios: &HashMap<String, f64>,
+        stats: &mut Stats,
+    ) {
+        for (repo_name, repo_data) in repo_languages {
+            let ratio = ratios.get(repo_name).copied().unwrap_or(1.0);
+
+            for lang_entry in &repo_data.languages {
+                // Precision loss is acceptable for byte counts; truncation is intentional
+                // (rounding a positive value), and sign loss cannot occur (ratio >= 0)
+                #[allow(
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss
+                )]
+                let weighted_size = (lang_entry.size as f64 * ratio).round() as u64;
+
+                let entry = stats
+                    .languages
+                    .entry(lang_entry.name.clone())
+                    .or_insert(LanguageInfo {
+                        size: 0,
+                        occurrences: 0,
+                        color: lang_entry.color.clone(),
+                        percentage: 0.0,
+                    });
+
+                entry.size += weighted_size;
+                entry.occurrences += 1;
+            }
+        }
+    }
+
+    fn extract_lines_changed(&self, contributor_stats: &HashMap<String, Value>) -> (u64, u64) {
+        let mut total_added = 0u64;
+        let mut total_deleted = 0u64;
+
+        for contributors in contributor_stats.values() {
+            if let Some(contrib_array) = contributors.as_array() {
+                for contributor in contrib_array {
+                    if let Some(author) = contributor["author"]["login"].as_str() {
+                        if author.eq_ignore_ascii_case(&self.username) {
+                            if let Some(weeks) = contributor["weeks"].as_array() {
+                                for week in weeks {
+                                    total_added += week["a"].as_u64().unwrap_or(0);
+                                    total_deleted += week["d"].as_u64().unwrap_or(0);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        (total_added, total_deleted)
     }
 
     fn build_repos_query(owned_cursor: Option<&str>, contrib_cursor: Option<&str>) -> String {
@@ -380,7 +548,7 @@ impl StatsCollector {
                         first: 100,
                         includeUserRepositories: false,
                         orderBy: {{field: UPDATED_AT, direction: DESC}},
-                        contributionTypes: [COMMIT, PULL_REQUEST, PULL_REQUEST_REVIEW]
+                        contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY, PULL_REQUEST_REVIEW]
                         after: {}
                     ) {{
                         pageInfo {{
