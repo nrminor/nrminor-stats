@@ -397,7 +397,7 @@ impl StatsCollector {
 
         let total = weighted_count + fallback_count;
         println!(
-            "Weighted {weighted_count}/{total} repos by contribution ratio ({fallback_count} fell back to 100%)"
+            "Weighted {weighted_count}/{total} repos by contribution ratio ({fallback_count} fell back to 0%)"
         );
 
         ratios
