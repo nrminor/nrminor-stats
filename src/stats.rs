@@ -380,7 +380,7 @@ impl StatsCollector {
                         first: 100,
                         includeUserRepositories: false,
                         orderBy: {{field: UPDATED_AT, direction: DESC}},
-                        contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY, PULL_REQUEST_REVIEW]
+                        contributionTypes: [COMMIT, PULL_REQUEST, PULL_REQUEST_REVIEW]
                         after: {}
                     ) {{
                         pageInfo {{
