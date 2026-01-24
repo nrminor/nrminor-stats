@@ -379,16 +379,17 @@ impl StatsCollector {
             let result = if let Some(contributors) = contributor_stats.get(repo_name) {
                 self.calculate_single_ratio(repo_name, contributors)
             } else {
-                println!("  [fallback] {repo_name}: no contributor stats available");
+                println!("  [fallback] {repo_name}: no contributor stats available (0%)");
                 RatioResult::FallbackNoStats
             };
 
+            // If we can't verify contribution, assume 0% to avoid inflating stats
             let ratio = if let RatioResult::Calculated(r) = &result {
                 weighted_count += 1;
                 *r
             } else {
                 fallback_count += 1;
-                1.0
+                0.0
             };
 
             ratios.insert(repo_name.clone(), ratio);
@@ -404,12 +405,12 @@ impl StatsCollector {
 
     fn calculate_single_ratio(&self, repo_name: &str, contributors: &Value) -> RatioResult {
         let Some(contrib_array) = contributors.as_array() else {
-            println!("  [fallback] {repo_name}: contributor stats not an array");
+            println!("  [fallback] {repo_name}: contributor stats not an array (0%)");
             return RatioResult::FallbackNoStats;
         };
 
         if contrib_array.is_empty() {
-            println!("  [fallback] {repo_name}: empty contributor stats");
+            println!("  [fallback] {repo_name}: empty contributor stats (0%)");
             return RatioResult::FallbackEmptyStats;
         }
 
@@ -433,15 +434,12 @@ impl StatsCollector {
         }
 
         if total_added == 0 {
-            println!("  [fallback] {repo_name}: no lines added by any contributor");
+            println!("  [fallback] {repo_name}: no lines added by any contributor (0%)");
             return RatioResult::FallbackNoLines;
         }
 
         if !found_user {
-            println!(
-                "  [fallback] {}: user '{}' not found in contributors",
-                repo_name, self.username
-            );
+            println!("  [fallback] {repo_name}: user '{}' not found in contributors (0%)", self.username);
             return RatioResult::FallbackUserNotFound;
         }
 
