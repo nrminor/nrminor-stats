@@ -67,7 +67,7 @@ impl StatsCollector {
     ) -> Self {
         Self {
             username: username.to_string(),
-            client: GitHubClient::new(access_token, 10),
+            client: GitHubClient::new(access_token, 25),
             excluded_repos,
             excluded_langs: excluded_langs.iter().map(|s| s.to_lowercase()).collect(),
             exclude_forked,
@@ -92,9 +92,12 @@ impl StatsCollector {
         let (repos, repo_languages) = self.collect_repos(&mut stats).await?;
         stats.total_repos = repos.len();
 
-        // Phase 2: Fetch contributor stats for all repos (used for both
-        // contribution ratios and lines changed)
-        let contributor_stats = self.fetch_contributor_stats(&repos).await;
+        // Phase 2: Fetch contributor stats, views, and contributions in parallel
+        let (contributor_stats, views, contributions) = tokio::join!(
+            self.fetch_contributor_stats(&repos),
+            self.collect_views(&repos),
+            self.collect_contributions()
+        );
 
         // Phase 3: Calculate contribution ratios and apply weighted language stats
         let ratios = self.calculate_contribution_ratios(&contributor_stats, &repos);
@@ -104,12 +107,6 @@ impl StatsCollector {
         let (added, deleted) = self.extract_lines_changed(&contributor_stats);
         stats.lines_added = added;
         stats.lines_deleted = deleted;
-
-        // Collect contributions and views in parallel
-        let (contributions, views) = tokio::join!(
-            self.collect_contributions(),
-            self.collect_views(&repos)
-        );
 
         stats.total_contributions = contributions?;
 

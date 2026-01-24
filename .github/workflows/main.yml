@@ -36,15 +36,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build Rust version if needed
+    - name: Build Rust version (incremental)
       id: rust_build
       run: |
-        if [ ! -f "target/release/github-stats" ]; then
-          echo "Binary not found in cache, building..."
-          cargo build --release
-        else
-          echo "Using cached binary"
-        fi
+        # Always run cargo build - it handles incremental compilation
+        # and will be fast if nothing changed
+        cargo build --release
 
     - name: Run Rust version
       id: rust_run
