@@ -1,10 +1,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::fmt::Write;
+use std::{collections::HashMap, fmt::Write, fs, path::Path};
 
 use crate::github_client::GitHubClient;
+
+const RATIO_CACHE_PATH: &str = ".github_stats_cache/ratio_cache.json";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Stats {
@@ -366,51 +367,106 @@ impl StatsCollector {
         stats_map
     }
 
+    fn load_ratio_cache() -> HashMap<String, f64> {
+        let path = Path::new(RATIO_CACHE_PATH);
+        if !path.exists() {
+            return HashMap::new();
+        }
+
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|contents| serde_json::from_str(&contents).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_ratio_cache(ratios: &HashMap<String, f64>) {
+        // Ensure cache directory exists
+        if let Some(parent) = Path::new(RATIO_CACHE_PATH).parent() {
+            fs::create_dir_all(parent).ok();
+        }
+
+        if let Ok(contents) = serde_json::to_string_pretty(ratios) {
+            fs::write(RATIO_CACHE_PATH, contents).ok();
+        }
+    }
+
+    fn is_owned_repo(&self, repo_name: &str) -> bool {
+        repo_name.starts_with(&format!("{}/", self.username))
+    }
+
     fn calculate_contribution_ratios(
         &self,
         contributor_stats: &HashMap<String, Value>,
         all_repos: &[String],
     ) -> HashMap<String, f64> {
+        let cached_ratios = Self::load_ratio_cache();
         let mut ratios = HashMap::new();
-        let mut weighted_count = 0u32;
+        let mut calculated_count = 0u32;
+        let mut from_cache_count = 0u32;
         let mut fallback_count = 0u32;
 
         for repo_name in all_repos {
             let result = if let Some(contributors) = contributor_stats.get(repo_name) {
-                self.calculate_single_ratio(repo_name, contributors)
+                self.calculate_single_ratio(contributors)
             } else {
-                println!("  [fallback] {repo_name}: no contributor stats available (0%)");
                 RatioResult::FallbackNoStats
             };
 
-            // If we can't verify contribution, assume 0% to avoid inflating stats
-            let ratio = if let RatioResult::Calculated(r) = &result {
-                weighted_count += 1;
-                *r
-            } else {
-                fallback_count += 1;
-                0.0
+            let ratio = match &result {
+                RatioResult::Calculated(r) => {
+                    calculated_count += 1;
+                    *r
+                }
+                _ => {
+                    // API failed - try cache first, then ownership heuristic
+                    if let Some(&cached) = cached_ratios.get(repo_name) {
+                        from_cache_count += 1;
+                        println!(
+                            "  [cached] {repo_name}: using cached ratio {:.0}%",
+                            cached * 100.0
+                        );
+                        cached
+                    } else {
+                        fallback_count += 1;
+                        let is_owned = self.is_owned_repo(repo_name);
+                        let fallback_ratio = if is_owned { 1.0 } else { 0.0 };
+                        let reason = match &result {
+                            RatioResult::FallbackNoStats => "no contributor stats available",
+                            RatioResult::FallbackEmptyStats => "empty contributor stats",
+                            RatioResult::FallbackNoLines => "no lines added by any contributor",
+                            RatioResult::FallbackUserNotFound => "user not found in contributors",
+                            RatioResult::Calculated(_) => unreachable!(),
+                        };
+                        let owner_status = if is_owned { "owner" } else { "not owner" };
+                        println!(
+                            "  [fallback] {repo_name}: {reason}, {owner_status} ({:.0}%)",
+                            fallback_ratio * 100.0
+                        );
+                        fallback_ratio
+                    }
+                }
             };
 
             ratios.insert(repo_name.clone(), ratio);
         }
 
-        let total = weighted_count + fallback_count;
+        // Save updated ratios to cache
+        Self::save_ratio_cache(&ratios);
+
+        let total = calculated_count + from_cache_count + fallback_count;
         println!(
-            "Weighted {weighted_count}/{total} repos by contribution ratio ({fallback_count} fell back to 0%)"
+            "Weighted {total} repos: {calculated_count} calculated, {from_cache_count} from cache, {fallback_count} fell back"
         );
 
         ratios
     }
 
-    fn calculate_single_ratio(&self, repo_name: &str, contributors: &Value) -> RatioResult {
+    fn calculate_single_ratio(&self, contributors: &Value) -> RatioResult {
         let Some(contrib_array) = contributors.as_array() else {
-            println!("  [fallback] {repo_name}: contributor stats not an array (0%)");
             return RatioResult::FallbackNoStats;
         };
 
         if contrib_array.is_empty() {
-            println!("  [fallback] {repo_name}: empty contributor stats (0%)");
             return RatioResult::FallbackEmptyStats;
         }
 
@@ -419,9 +475,9 @@ impl StatsCollector {
         let mut found_user = false;
 
         for contributor in contrib_array {
-            let added: u64 = contributor["weeks"]
-                .as_array()
-                .map_or(0, |weeks| weeks.iter().map(|w| w["a"].as_u64().unwrap_or(0)).sum());
+            let added: u64 = contributor["weeks"].as_array().map_or(0, |weeks| {
+                weeks.iter().map(|w| w["a"].as_u64().unwrap_or(0)).sum()
+            });
 
             total_added += added;
 
@@ -434,12 +490,10 @@ impl StatsCollector {
         }
 
         if total_added == 0 {
-            println!("  [fallback] {repo_name}: no lines added by any contributor (0%)");
             return RatioResult::FallbackNoLines;
         }
 
         if !found_user {
-            println!("  [fallback] {repo_name}: user '{}' not found in contributors (0%)", self.username);
             return RatioResult::FallbackUserNotFound;
         }
 
@@ -466,15 +520,16 @@ impl StatsCollector {
                 )]
                 let weighted_size = (lang_entry.size as f64 * ratio).round() as u64;
 
-                let entry = stats
-                    .languages
-                    .entry(lang_entry.name.clone())
-                    .or_insert(LanguageInfo {
-                        size: 0,
-                        occurrences: 0,
-                        color: lang_entry.color.clone(),
-                        percentage: 0.0,
-                    });
+                let entry =
+                    stats
+                        .languages
+                        .entry(lang_entry.name.clone())
+                        .or_insert(LanguageInfo {
+                            size: 0,
+                            occurrences: 0,
+                            color: lang_entry.color.clone(),
+                            percentage: 0.0,
+                        });
 
                 entry.size += weighted_size;
                 entry.occurrences += 1;
@@ -483,27 +538,23 @@ impl StatsCollector {
     }
 
     fn extract_lines_changed(&self, contributor_stats: &HashMap<String, Value>) -> (u64, u64) {
-        let mut total_added = 0u64;
-        let mut total_deleted = 0u64;
-
-        for contributors in contributor_stats.values() {
-            if let Some(contrib_array) = contributors.as_array() {
-                for contributor in contrib_array {
-                    if let Some(author) = contributor["author"]["login"].as_str() {
-                        if author.eq_ignore_ascii_case(&self.username) {
-                            if let Some(weeks) = contributor["weeks"].as_array() {
-                                for week in weeks {
-                                    total_added += week["a"].as_u64().unwrap_or(0);
-                                    total_deleted += week["d"].as_u64().unwrap_or(0);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        (total_added, total_deleted)
+        contributor_stats
+            .values()
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter(|c| {
+                c["author"]["login"]
+                    .as_str()
+                    .is_some_and(|author| author.eq_ignore_ascii_case(&self.username))
+            })
+            .filter_map(|c| c["weeks"].as_array())
+            .flatten()
+            .fold((0u64, 0u64), |(added, deleted), week| {
+                (
+                    added + week["a"].as_u64().unwrap_or(0),
+                    deleted + week["d"].as_u64().unwrap_or(0),
+                )
+            })
     }
 
     fn build_repos_query(owned_cursor: Option<&str>, contrib_cursor: Option<&str>) -> String {
