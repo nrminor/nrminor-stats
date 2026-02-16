@@ -16,29 +16,36 @@ jobs:
 
     steps:
     # Check out repository under $GITHUB_WORKSPACE, so the job can access it
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     # Try Rust version first (much faster)
     - name: Setup Rust
+      id: rust_toolchain
       uses: dtolnay/rust-toolchain@stable
-    
-    - name: Cache Rust dependencies and binary
-      uses: actions/cache@v3
+
+    - name: Cache compiled binary
+      id: cache-binary
+      uses: actions/cache@v4
+      with:
+        path: target/release/github-stats
+        key: ${{ runner.os }}-binary-${{ steps.rust_toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'src/**/*.rs') }}
+
+    - name: Cache Cargo registry and build artifacts
+      if: steps.cache-binary.outputs.cache-hit != 'true'
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'src/**/*.rs') }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build Rust version (incremental)
+    - name: Build Rust version
+      if: steps.cache-binary.outputs.cache-hit != 'true'
       id: rust_build
-      run: |
-        # Always run cargo build - it handles incremental compilation
-        # and will be fast if nothing changed
-        cargo build --release
+      run: cargo build --release
 
     - name: Run Rust version
       id: rust_run
